@@ -6,12 +6,13 @@ import { GameStateService, GameStatus } from '../services/game-state.service';
 @Component({
   selector: 'app-three-scene',
   standalone: true,
-  template: `<div #canvasContainer class="w-full h-full"></div>`,
+  template: `<div #canvasContainer class="w-full h-full block"></div>`,
   styles: [`
     :host {
       display: block;
       width: 100%;
       height: 100%;
+      overflow: hidden;
     }
   `]
 })
@@ -24,9 +25,12 @@ export class ThreeSceneComponent implements AfterViewInit, OnDestroy {
   private camera!: THREE.PerspectiveCamera;
   private renderer!: THREE.WebGLRenderer;
   private requestAnimationId: number = 0;
+  private resizeObserver: ResizeObserver | null = null;
 
   // Game Objects
   private player!: THREE.Group;
+  private propeller!: THREE.Mesh; // Reference to rotate propeller
+  private floorGrid!: THREE.GridHelper; // Moving floor reference
   
   // Game State Internals
   private currentLane: number = 0; // -1 (Left), 0 (Center), 1 (Right)
@@ -48,15 +52,14 @@ export class ThreeSceneComponent implements AfterViewInit, OnDestroy {
   private particles!: THREE.Points;
 
   private colors = {
-    orange: 0xF58220, 
-    white: 0xFFFFFF,  
-    visor: 0x00BFFF,  
-    black: 0x333333
+    red: 0xD9381E, 
+    white: 0xEEEEEE,  
+    glass: 0x88CCFF,  
+    metal: 0x999999,
+    dark: 0x222222
   };
 
   constructor() {
-    // We removed the effect() here to handle reset synchronously in the animate loop
-    // to avoid race conditions between Signal updates and requestAnimationFrame.
   }
 
   ngAfterViewInit() {
@@ -64,14 +67,23 @@ export class ThreeSceneComponent implements AfterViewInit, OnDestroy {
     this.createScene(); 
     this.animate();
 
-    window.addEventListener('resize', this.onWindowResize.bind(this));
+    // Use ResizeObserver to handle container size changes robustly
+    this.resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+          this.updateRendererSize(entry.contentRect.width, entry.contentRect.height);
+        }
+      }
+    });
+    this.resizeObserver.observe(this.canvasContainer.nativeElement);
   }
 
   ngOnDestroy() {
     if (this.requestAnimationId) {
       cancelAnimationFrame(this.requestAnimationId);
     }
-    window.removeEventListener('resize', this.onWindowResize.bind(this));
+    this.resizeObserver?.disconnect();
+    
     if (this.renderer) {
       this.renderer.dispose();
     }
@@ -101,16 +113,11 @@ export class ThreeSceneComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  private onWindowResize() {
-    if (!this.camera || !this.renderer || !this.canvasContainer) return;
-    
-    const container = this.canvasContainer.nativeElement;
-    // Check for valid dimensions to avoid 0-divide errors or warnings
-    if (container.clientWidth > 0 && container.clientHeight > 0) {
-      this.camera.aspect = container.clientWidth / container.clientHeight;
-      this.camera.updateProjectionMatrix();
-      this.renderer.setSize(container.clientWidth, container.clientHeight);
-    }
+  private updateRendererSize(width: number, height: number) {
+    if (!this.camera || !this.renderer) return;
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(width, height);
   }
 
   private changeLane(direction: number) {
@@ -118,10 +125,6 @@ export class ThreeSceneComponent implements AfterViewInit, OnDestroy {
     if (newLane >= -1 && newLane <= 1) {
       this.currentLane = newLane;
       this.targetX = this.currentLane * this.laneWidth;
-      
-      if (this.player) {
-        this.player.rotation.z = -direction * 0.2; 
-      }
     }
   }
 
@@ -134,39 +137,37 @@ export class ThreeSceneComponent implements AfterViewInit, OnDestroy {
 
   private initThree() {
     const container = this.canvasContainer.nativeElement;
+    const width = container.clientWidth || 1;
+    const height = container.clientHeight || 1;
     
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0a0a1a);
-    this.scene.fog = new THREE.FogExp2(0x0a0a1a, 0.02);
+    this.scene.background = new THREE.Color(0x87CEEB); // Sky blue
+    this.scene.fog = new THREE.Fog(0x87CEEB, 20, 90);
 
-    this.camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 100);
-    this.camera.position.set(0, 4, 8);
+    this.camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 100);
+    this.camera.position.set(0, 3, 7);
     this.camera.lookAt(0, 1, 0);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setSize(container.clientWidth, container.clientHeight);
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    this.renderer.setSize(width, height);
+    this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     this.scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-    dirLight.position.set(5, 15, 10);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    dirLight.position.set(10, 20, 10);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
-    // Optimize shadow cam
-    dirLight.shadow.camera.left = -10;
-    dirLight.shadow.camera.right = 10;
-    dirLight.shadow.camera.top = 10;
-    dirLight.shadow.camera.bottom = -10;
+    dirLight.shadow.camera.left = -15;
+    dirLight.shadow.camera.right = 15;
+    dirLight.shadow.camera.top = 15;
+    dirLight.shadow.camera.bottom = -15;
     this.scene.add(dirLight);
-    
-    const backLight = new THREE.DirectionalLight(0x00BFFF, 0.8);
-    backLight.position.set(-5, 5, -10);
-    this.scene.add(backLight);
   }
 
   private createScene() {
@@ -177,147 +178,159 @@ export class ThreeSceneComponent implements AfterViewInit, OnDestroy {
   private createPlayer() {
     this.player = new THREE.Group();
 
-    // Materials
-    const orangeMat = new THREE.MeshStandardMaterial({ color: this.colors.orange, roughness: 0.3 });
-    const whiteMat = new THREE.MeshStandardMaterial({ color: this.colors.white, roughness: 0.2 });
-    const blackMat = new THREE.MeshStandardMaterial({ color: this.colors.black, roughness: 0.8 });
-    const visorMat = new THREE.MeshPhysicalMaterial({ 
-      color: this.colors.visor, 
+    const redMat = new THREE.MeshStandardMaterial({ color: this.colors.red, roughness: 0.3, metalness: 0.1 });
+    const whiteMat = new THREE.MeshStandardMaterial({ color: this.colors.white, roughness: 0.5 });
+    const metalMat = new THREE.MeshStandardMaterial({ color: this.colors.metal, roughness: 0.2, metalness: 0.8 });
+    const glassMat = new THREE.MeshPhysicalMaterial({ 
+      color: this.colors.glass, 
       roughness: 0.1, 
-      transmission: 0.6,
-      thickness: 0.5,
+      transmission: 0.5,
       transparent: true,
-      opacity: 0.8
+      opacity: 0.7
     });
+    const darkMat = new THREE.MeshStandardMaterial({ color: this.colors.dark });
 
-    // Body
-    const bodyGeo = new THREE.CapsuleGeometry(0.55, 0.8, 4, 16);
-    const body = new THREE.Mesh(bodyGeo, orangeMat);
+    // Fuselage
+    // Main body
+    // Orient to face -Z (into the screen). Top of Cylinder (+Y) maps to -Z.
+    const bodyGeo = new THREE.CylinderGeometry(0.35, 0.15, 2.0, 12);
+    bodyGeo.rotateX(Math.PI / 2); 
+    const body = new THREE.Mesh(bodyGeo, redMat);
     body.position.y = 1.0;
     body.castShadow = true;
     this.player.add(body);
 
-    // Chest Plate
-    const chestGeo = new THREE.CylinderGeometry(0.57, 0.57, 0.45, 16, 1, true); 
-    const chest = new THREE.Mesh(chestGeo, whiteMat);
-    chest.position.y = 1.35;
-    chest.rotation.y = -Math.PI / 2;
-    chest.scale.set(1, 1, 1);
-    this.player.add(chest);
+    // Engine Cowling (Front) at -Z
+    const cowlGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.4, 12);
+    cowlGeo.rotateX(Math.PI / 2);
+    const cowl = new THREE.Mesh(cowlGeo, whiteMat);
+    cowl.position.set(0, 1.0, -1.0); // -Z is front
+    cowl.castShadow = true;
+    this.player.add(cowl);
+
+    // Cockpit
+    const cockpitGeo = new THREE.CapsuleGeometry(0.28, 0.6, 4, 8);
+    cockpitGeo.rotateX(Math.PI / 2);
+    const cockpit = new THREE.Mesh(cockpitGeo, glassMat);
+    cockpit.position.set(0, 1.25, -0.1);
+    cockpit.scale.y = 0.8; 
+    this.player.add(cockpit);
+
+    // Wings
+    const wingGeo = new THREE.BoxGeometry(2.8, 0.08, 0.7);
+    const wings = new THREE.Mesh(wingGeo, redMat);
+    wings.position.set(0, 1.05, -0.4);
+    wings.castShadow = true;
+    this.player.add(wings);
     
-    // Backpack
-    const packGeo = new THREE.BoxGeometry(0.8, 0.8, 0.4);
-    const pack = new THREE.Mesh(packGeo, whiteMat);
-    pack.position.set(0, 1.3, -0.5);
-    pack.castShadow = true;
-    this.player.add(pack);
+    // Wing Struts
+    const strutGeo = new THREE.BoxGeometry(0.05, 0.05, 0.4);
+    const leftStrut = new THREE.Mesh(strutGeo, metalMat);
+    leftStrut.position.set(-0.8, 0.9, -0.4);
+    this.player.add(leftStrut);
+    const rightStrut = new THREE.Mesh(strutGeo, metalMat);
+    rightStrut.position.set(0.8, 0.9, -0.4);
+    this.player.add(rightStrut);
 
-    // Head
-    const headGeo = new THREE.SphereGeometry(0.55, 32, 32);
-    const head = new THREE.Mesh(headGeo, whiteMat);
-    head.position.y = 1.85;
-    head.castShadow = true;
-    this.player.add(head);
+    // Tail (Rear at +Z)
+    // Vertical Stabilizer
+    const vTailGeo = new THREE.BoxGeometry(0.1, 0.6, 0.5);
+    const vTail = new THREE.Mesh(vTailGeo, redMat);
+    vTail.position.set(0, 1.3, 0.8);
+    vTail.rotation.x = 0.4; // Sweep back (+Z)
+    vTail.castShadow = true;
+    this.player.add(vTail);
 
-    // Visor
-    const visorGeo = new THREE.SphereGeometry(0.42, 32, 32);
-    const visor = new THREE.Mesh(visorGeo, visorMat);
-    visor.position.set(0, 1.85, 0.25);
-    visor.scale.set(1, 1, 0.7);
-    this.player.add(visor);
+    // Horizontal Stabilizer
+    const hTailGeo = new THREE.BoxGeometry(1.2, 0.08, 0.4);
+    const hTail = new THREE.Mesh(hTailGeo, redMat);
+    hTail.position.set(0, 1.1, 0.8);
+    hTail.castShadow = true;
+    this.player.add(hTail);
 
-    // Ears
-    const earGeo = new THREE.CapsuleGeometry(0.12, 0.7, 4, 8);
+    // Propeller Group (Front at -Z)
+    const propGroup = new THREE.Group();
+    propGroup.position.set(0, 1.0, -1.22); 
     
-    const leftEar = new THREE.Mesh(earGeo, whiteMat);
-    leftEar.position.set(-0.3, 2.5, 0);
-    leftEar.rotation.z = 0.2;
-    leftEar.castShadow = true;
+    // Spinner
+    const spinnerGeo = new THREE.ConeGeometry(0.15, 0.3, 12);
+    spinnerGeo.rotateX(-Math.PI / 2); // Point to -Z
+    const spinner = new THREE.Mesh(spinnerGeo, metalMat);
+    propGroup.add(spinner);
+
+    // Blades
+    const bladeGeo = new THREE.BoxGeometry(1.6, 0.15, 0.02);
+    const blades = new THREE.Mesh(bladeGeo, darkMat);
+    propGroup.add(blades);
+    const blades2 = new THREE.Mesh(bladeGeo, darkMat);
+    blades2.rotation.z = Math.PI / 2;
+    propGroup.add(blades2);
+
+    this.propeller = propGroup as any; 
+    this.player.add(propGroup);
+
+    // Wheels (Forward -Z)
+    const gearLegGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.5);
+    const wheelGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.1, 12);
+    wheelGeo.rotateZ(Math.PI / 2);
+
+    const leftLeg = new THREE.Mesh(gearLegGeo, metalMat);
+    leftLeg.position.set(-0.5, 0.7, -0.5);
+    leftLeg.rotation.z = 0.3;
+    leftLeg.rotation.x = 0.2;
+    this.player.add(leftLeg);
     
-    const rightEar = new THREE.Mesh(earGeo, whiteMat);
-    rightEar.position.set(0.3, 2.5, 0);
-    rightEar.rotation.z = -0.2;
-    rightEar.castShadow = true;
-    this.player.add(leftEar, rightEar);
+    const leftWheel = new THREE.Mesh(wheelGeo, darkMat);
+    leftWheel.position.set(-0.65, 0.5, -0.5);
+    this.player.add(leftWheel);
 
-    // Arms
-    const armGeo = new THREE.CapsuleGeometry(0.14, 0.5, 4, 8);
-    const leftArm = new THREE.Mesh(armGeo, orangeMat);
-    leftArm.position.set(-0.7, 1.2, 0);
-    leftArm.rotation.z = 0.4;
-    leftArm.castShadow = true;
-    const rightArm = new THREE.Mesh(armGeo, orangeMat);
-    rightArm.position.set(0.7, 1.2, 0);
-    rightArm.rotation.z = -0.4;
-    rightArm.castShadow = true;
-    
-    // Gloves
-    const gloveGeo = new THREE.SphereGeometry(0.18);
-    const leftGlove = new THREE.Mesh(gloveGeo, blackMat);
-    leftGlove.position.y = -0.35;
-    leftArm.add(leftGlove);
-    const rightGlove = new THREE.Mesh(gloveGeo, blackMat);
-    rightGlove.position.y = -0.35;
-    rightArm.add(rightGlove);
+    const rightLeg = new THREE.Mesh(gearLegGeo, metalMat);
+    rightLeg.position.set(0.5, 0.7, -0.5);
+    rightLeg.rotation.z = -0.3;
+    rightLeg.rotation.x = 0.2;
+    this.player.add(rightLeg);
 
-    this.player.add(leftArm, rightArm);
-
-    // Legs
-    const legGeo = new THREE.CapsuleGeometry(0.2, 0.7, 4, 8);
-    const leftLeg = new THREE.Mesh(legGeo, orangeMat);
-    leftLeg.position.set(-0.25, 0.5, 0);
-    leftLeg.castShadow = true;
-    const rightLeg = new THREE.Mesh(legGeo, orangeMat);
-    rightLeg.position.set(0.25, 0.5, 0);
-    rightLeg.castShadow = true;
-
-    // Boots
-    const bootGeo = new THREE.CylinderGeometry(0.22, 0.24, 0.3);
-    const leftBoot = new THREE.Mesh(bootGeo, blackMat);
-    leftBoot.position.y = -0.4;
-    leftLeg.add(leftBoot);
-    const rightBoot = new THREE.Mesh(bootGeo, blackMat);
-    rightBoot.position.y = -0.4;
-    rightLeg.add(rightBoot);
-
-    this.player.add(leftLeg, rightLeg);
+    const rightWheel = new THREE.Mesh(wheelGeo, darkMat);
+    rightWheel.position.set(0.65, 0.5, -0.5);
+    this.player.add(rightWheel);
 
     this.scene.add(this.player);
   }
 
   private createEnvironment() {
-    // Grid floor
-    const gridHelper = new THREE.GridHelper(300, 150, 0x00BFFF, 0x222244);
-    gridHelper.position.y = 0;
-    gridHelper.position.z = -50; 
-    this.scene.add(gridHelper);
-    
-    // Floor plane just to block view below
-    const planeGeo = new THREE.PlaneGeometry(300, 300);
-    const planeMat = new THREE.MeshBasicMaterial({ color: 0x050510 });
+    // Ocean/Ground base
+    const planeGeo = new THREE.PlaneGeometry(500, 500);
+    const planeMat = new THREE.MeshPhongMaterial({ 
+        color: 0x1a3c6e, // Ocean Blue
+        flatShading: true,
+        shininess: 30
+    });
     const plane = new THREE.Mesh(planeGeo, planeMat);
     plane.rotation.x = -Math.PI / 2;
-    plane.position.y = -0.1;
+    plane.position.y = -2;
     this.scene.add(plane);
 
-    // Stars
-    const starsGeo = new THREE.BufferGeometry();
-    const starCount = 1500;
-    const posArray = new Float32Array(starCount * 3);
+    // Infinite Scrolling Grid
+    this.floorGrid = new THREE.GridHelper(500, 100, 0x4fa3e3, 0x2e6b9c);
+    this.floorGrid.position.y = -1.9; // Just above the blue plane
+    this.floorGrid.position.z = -50;
+    this.scene.add(this.floorGrid);
+
+    // Clouds (Particles)
+    const cloudGeo = new THREE.BoxGeometry(4, 2, 3);
+    const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 });
     
-    for(let i=0; i < starCount * 3; i++) {
-        posArray[i] = (Math.random() - 0.5) * 150; 
+    this.particles = new THREE.Group() as any;
+    for(let i=0; i<30; i++) {
+        const cloud = new THREE.Mesh(cloudGeo, cloudMat);
+        cloud.position.set(
+            (Math.random() - 0.5) * 100,
+            Math.random() * 10 + 5, // High up
+            -Math.random() * 200
+        );
+        cloud.scale.setScalar(Math.random() * 2 + 1);
+        (this.particles as any).add(cloud);
     }
-    
-    starsGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
-    const starsMat = new THREE.PointsMaterial({
-        size: 0.15,
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0.6
-    });
-    
-    this.particles = new THREE.Points(starsGeo, starsMat);
     this.scene.add(this.particles);
   }
 
@@ -328,95 +341,110 @@ export class ThreeSceneComponent implements AfterViewInit, OnDestroy {
     const lane = lanes[Math.floor(Math.random() * lanes.length)];
     const xPos = lane * this.laneWidth;
 
-    const type = Math.random() > 0.6 ? 'box' : 'tall'; 
+    const type = Math.random() > 0.5 ? 'balloon' : 'pylon'; 
     
     const obstacleGroup = new THREE.Group();
     
-    if (type === 'box') {
-        const geo = new THREE.BoxGeometry(1.8, 1.8, 1.8);
+    if (type === 'balloon') {
+        const balloonGeo = new THREE.SphereGeometry(1.5, 16, 16);
+        const balloonMat = new THREE.MeshStandardMaterial({ color: 0xff4466 });
+        const balloon = new THREE.Mesh(balloonGeo, balloonMat);
+        balloon.position.y = 2.5;
+        balloon.castShadow = true;
+        
+        const basketGeo = new THREE.BoxGeometry(0.8, 0.6, 0.8);
+        const basketMat = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+        const basket = new THREE.Mesh(basketGeo, basketMat);
+        basket.position.y = 0.5;
+
+        // Ropes
+        const ropeGeo = new THREE.CylinderGeometry(0.02, 0.02, 1.5);
+        const ropeMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+        const r1 = new THREE.Mesh(ropeGeo, ropeMat); r1.position.set(0.3, 1.5, 0.3);
+        const r2 = new THREE.Mesh(ropeGeo, ropeMat); r2.position.set(-0.3, 1.5, 0.3);
+        const r3 = new THREE.Mesh(ropeGeo, ropeMat); r3.position.set(0.3, 1.5, -0.3);
+        const r4 = new THREE.Mesh(ropeGeo, ropeMat); r4.position.set(-0.3, 1.5, -0.3);
+
+        obstacleGroup.add(balloon, basket, r1, r2, r3, r4);
+    } else {
+        const geo = new THREE.BoxGeometry(2.0, 2.0, 2.0);
         const mat = new THREE.MeshStandardMaterial({ 
-            color: 0xff4400, 
-            roughness: 0.4,
-            metalness: 0.3
+            color: 0x555555, 
+            roughness: 0.7,
+            metalness: 0.5
         });
         const mesh = new THREE.Mesh(geo, mat);
-        mesh.position.y = 0.9;
-        mesh.castShadow = true;
-        obstacleGroup.add(mesh);
-    } else {
-        // Floating Drone/Mine
-        const geo = new THREE.OctahedronGeometry(1.0);
-        const mat = new THREE.MeshStandardMaterial({ color: 0x8800ff, roughness: 0.2, metalness: 0.8 });
-        const mesh = new THREE.Mesh(geo, mat);
         mesh.position.y = 1.5;
-        mesh.rotation.z = Math.random();
         mesh.castShadow = true;
         
-        // Spikes
-        const spikeGeo = new THREE.ConeGeometry(0.2, 2.5, 8);
-        const spike1 = new THREE.Mesh(spikeGeo, mat);
-        spike1.rotation.x = Math.PI/2;
-        mesh.add(spike1);
-
-        obstacleGroup.add(mesh);
+        const stripeGeo = new THREE.BoxGeometry(2.1, 0.4, 2.1);
+        const stripeMat = new THREE.MeshBasicMaterial({ color: 0xffcc00 });
+        const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+        stripe.position.y = 1.5;
+        stripe.rotation.y = 0.5;
+        
+        obstacleGroup.add(mesh, stripe);
     }
 
-    obstacleGroup.position.set(xPos, 0, -80); 
+    obstacleGroup.position.set(xPos, 0, -100); 
     this.scene.add(obstacleGroup);
     this.obstacles.push(obstacleGroup);
   }
 
   private resetScene() {
-      // Remove all obstacles
       for(const obs of this.obstacles) {
           this.scene.remove(obs);
       }
       this.obstacles = [];
       
-      // Reset player props
       this.currentLane = 0;
       this.targetX = 0;
       this.player.position.set(0, 0, 0);
       this.player.rotation.set(0, 0, 0);
       this.isJumping = false;
       this.playerY = 0;
-      
-      // Reset timestamps
       this.lastObstacleTime = Date.now();
   }
 
   private updatePlayer(deltaTime: number, now: number) {
     if (!this.player) return;
 
-    // Lateral Movement
-    const lerpSpeed = 10;
+    // Lateral Movement with smooth banking
+    const lerpSpeed = 8;
     this.player.position.x += (this.targetX - this.player.position.x) * lerpSpeed * deltaTime;
 
-    // Lean
-    const targetRotZ = (this.player.position.x - this.targetX) * 0.1; 
-    this.player.rotation.z += (targetRotZ - this.player.rotation.z) * lerpSpeed * deltaTime;
+    // Bank (Roll) logic
+    const moveDelta = this.targetX - this.player.position.x;
+    const targetBank = -moveDelta * 0.3; 
+    const maxBank = 0.8;
+    const clampedBank = Math.max(-maxBank, Math.min(maxBank, targetBank));
+    
+    this.player.rotation.z += (clampedBank - this.player.rotation.z) * lerpSpeed * deltaTime;
 
-    // Jump Physics
+    // Pitch (Jump) Physics
     if (this.isJumping) {
       this.playerY += this.jumpVelocity;
       this.jumpVelocity += this.gravity;
       
+      const targetPitch = Math.min(Math.max(this.jumpVelocity * 2, -0.5), 0.8);
+      this.player.rotation.x = targetPitch;
+
       if (this.playerY <= 0) {
         this.playerY = 0;
         this.isJumping = false;
         this.jumpVelocity = 0;
-        this.player.scale.y = 0.85; // Land squash
-      } else {
-        this.player.scale.y = 1.15; // Jump stretch
+        this.player.rotation.x = 0; 
       }
     } else {
-        // Run bob
-        this.playerY = Math.abs(Math.sin(now * 0.015)) * 0.1;
+        this.playerY = Math.abs(Math.sin(now * 0.003)) * 0.2;
+        this.player.rotation.x = Math.sin(now * 0.002) * 0.05;
     }
     
-    // Scale recovery
-    this.player.scale.y += (1 - this.player.scale.y) * 10 * deltaTime;
     this.player.position.y = this.playerY;
+
+    if (this.propeller) {
+        this.propeller.rotation.z -= 15 * deltaTime;
+    }
   }
 
   private animate() {
@@ -426,26 +454,29 @@ export class ThreeSceneComponent implements AfterViewInit, OnDestroy {
     const deltaTime = 0.016; 
     const status = this.gameState.status();
 
-    // Synchronous Reset:
-    // If we just transitioned to PLAYING from any other state, reset the scene immediately
-    // BEFORE running any physics or collision checks.
     if (status === 'PLAYING' && this.lastGameStatus !== 'PLAYING') {
       this.resetScene();
     }
     this.lastGameStatus = status;
 
     if (status === 'PLAYING') {
-        const currentSpeed = 30 * this.gameState.speed(); // Base speed 30 units/sec
+        const currentSpeed = 40 * this.gameState.speed(); // Faster for plane
         const frameMove = currentSpeed * deltaTime;
+        
+        // --- MOVE FLOOR GRID TO SHOW SPEED ---
+        if (this.floorGrid) {
+            this.floorGrid.position.z += frameMove;
+            // Cell size is 500 / 100 = 5.
+            // When we move 5 units, we can reset to 0 to loop infinitely seamlessly.
+            if (this.floorGrid.position.z > 5) {
+                this.floorGrid.position.z = 0;
+            }
+        }
         
         // Move obstacles
         for (let i = this.obstacles.length - 1; i >= 0; i--) {
             const obs = this.obstacles[i];
             obs.position.z += frameMove;
-            
-            // Rotate obstacles for visual flair
-            obs.children[0].rotation.x += 0.02;
-            obs.children[0].rotation.y += 0.01;
 
             if (obs.position.z > 15) {
                 this.scene.remove(obs);
@@ -461,9 +492,15 @@ export class ThreeSceneComponent implements AfterViewInit, OnDestroy {
             this.lastObstacleTime = now;
         }
 
-        // Particles
-        this.particles.position.z += frameMove * 0.2;
-        if (this.particles.position.z > 50) this.particles.position.z = 0;
+        // Clouds (Particles)
+        const clouds = this.particles as any as THREE.Group;
+        clouds.children.forEach((cloud: any) => {
+            cloud.position.z += frameMove * 0.5;
+            if (cloud.position.z > 20) {
+                cloud.position.z = -200;
+                cloud.position.x = (Math.random() - 0.5) * 100;
+            }
+        });
 
         // Player
         this.updatePlayer(deltaTime, now);
@@ -474,11 +511,23 @@ export class ThreeSceneComponent implements AfterViewInit, OnDestroy {
     } else if (status === 'MENU') {
         if (this.player) {
             this.player.position.x = 0;
-            this.player.position.y = Math.sin(now * 0.002) * 0.5 + 1;
-            this.player.rotation.y = Math.sin(now * 0.001) * 0.3;
+            this.player.position.y = Math.sin(now * 0.002) * 0.5 + 1.5;
+            this.player.rotation.z = Math.sin(now * 0.001) * 0.2;
+            this.player.rotation.x = 0;
+            if (this.propeller) this.propeller.rotation.z -= 0.2;
+            
+            this.camera.position.x = Math.sin(now * 0.0005) * 2;
+            this.camera.lookAt(0, 1, 0);
         }
+        
+        // Also scroll grid in menu slowly for effect
+        if (this.floorGrid) {
+             this.floorGrid.position.z += 10 * deltaTime;
+             if (this.floorGrid.position.z > 5) this.floorGrid.position.z = 0;
+        }
+
     } else if (status === 'GAME_OVER') {
-         // Static
+        // Crash
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -487,43 +536,31 @@ export class ThreeSceneComponent implements AfterViewInit, OnDestroy {
   private checkCollisions() {
     if(!this.player) return;
 
-    const pX = this.player.position.x;
-    const pY = this.player.position.y;
-    const pZ = this.player.position.z; // 0
+    const pBox = new THREE.Box3().setFromObject(this.player);
+    // Shrink slightly
+    pBox.min.x += 0.3; pBox.max.x -= 0.3;
+    pBox.min.y += 0.2; pBox.max.y -= 0.2;
+    pBox.min.z += 0.2; pBox.max.z -= 0.2;
 
     for (const obs of this.obstacles) {
-        
-        const distZ = Math.abs(obs.position.z - pZ);
-        const distX = Math.abs(obs.position.x - pX);
-        
-        // Z collision range
-        if (distZ < 1.5) {
-            // X collision range (lanes)
-            if (distX < 1.0) {
-                 // Use simple box intersection for robustness
-                 const pBox = new THREE.Box3().setFromObject(this.player);
-                 // Shrink hitbox for forgiveness
-                 pBox.min.x += 0.4; pBox.max.x -= 0.4;
-                 pBox.min.z += 0.4; pBox.max.z -= 0.4;
-                 
-                 const oBox = new THREE.Box3().setFromObject(obs);
-                 oBox.min.x += 0.2; oBox.max.x -= 0.2;
-                 oBox.min.z += 0.2; oBox.max.z -= 0.2;
+         const oBox = new THREE.Box3().setFromObject(obs);
+         // Shrink
+         oBox.min.x += 0.2; oBox.max.x -= 0.2;
+         oBox.min.z += 0.2; oBox.max.z -= 0.2;
 
-                 if (pBox.intersectsBox(oBox)) {
-                     this.handleCrash();
-                     return;
-                 }
-            }
-        }
+         if (pBox.intersectsBox(oBox)) {
+             this.handleCrash();
+             return;
+         }
     }
   }
 
   private handleCrash() {
     this.gameState.endGame();
     if(this.player) {
-        this.player.rotation.x = -Math.PI / 2;
-        this.player.position.y = 0.2;
+        this.player.rotation.x = -Math.PI / 4; 
+        this.player.rotation.z = Math.PI / 4; 
+        this.player.position.y = 0.5; 
     }
   }
 }

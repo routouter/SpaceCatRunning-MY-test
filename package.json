@@ -1,5 +1,5 @@
 {
-  "name": "space-cat-runner-3d",
+  "name": "sky-pilot-3d",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -22,7 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
-    "typescript": "^5.9.0",
+    "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }
 }
