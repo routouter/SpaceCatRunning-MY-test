@@ -26,11 +26,17 @@ import { CommonModule } from '@angular/common';
       <!-- Main Menu Screen -->
       @if (gameState.isMenu()) {
         <div class="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm z-50">
-          <div class="text-center transform transition-all hover:scale-105 duration-300">
-            <h1 class="text-6xl md:text-8xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-white mb-2 drop-shadow-[0_2px_10px_rgba(56,189,248,0.5)]">
-              SKY PILOT
-            </h1>
-            <p class="text-xl text-blue-200 mb-8 font-light tracking-widest">AERIAL ACROBATICS</p>
+          <div class="text-center transform transition-all hover:scale-105 duration-300 flex flex-col items-center">
+            
+            <!-- Logo Area -->
+            <div class="flex flex-col items-center mb-8">
+              <!-- Transparent Box with Dashed Border and Centered Text -->
+              <div class="w-80 md:w-96 h-24 bg-transparent border-4 border-dashed border-sky-500 rounded-lg shadow-[0_0_20px_rgba(56,189,248,0.3)] mb-2 flex items-center justify-center">
+                <span class="text-sky-400 font-black text-4xl md:text-5xl italic tracking-wider drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
+                  Plane Game
+                </span>
+              </div>
+            </div>
             
             <button 
               (click)="gameState.startGame()"
